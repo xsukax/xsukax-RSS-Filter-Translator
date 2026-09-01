@@ -1,0 +1,7 @@
+flask>=3.0
+feedparser>=6.0
+requests>=2.31
+waitress>=3.0
+argostranslate>=1.11
+minisbd>=0.9
+langdetect>=1.0.9

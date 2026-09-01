@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>xsukax RSS Filter &amp; Translator</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="logo">📡</div>
+    <h1><span class="brand">xsukax</span> RSS Filter &amp; Translator</h1>
+    <p class="tagline">Generate customized, keyword-filtered, locally translated RSS feed URLs.</p>
+  </header>
+
+  <nav>
+    <a href="{{ url_for('index') }}" class="active">⚙ Generator</a>
+    <a href="{{ url_for('models_page') }}">🌐 Translation models</a>
+    <a href="{{ url_for('change_password') }}">🔑 Change password</a>
+    <a href="{{ url_for('logout') }}">⏻ Logout</a>
+  </nav>
+
+  {% if errors %}
+  <div class="errors">
+    <strong>Please fix the following:</strong>
+    <ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul>
+  </div>
+  {% endif %}
+
+  {% if feed_url %}
+  <div class="result" id="result">
+    <h2>✔ Your customized RSS feed is ready</h2>
+    <div class="url-box">
+      <input id="feed-url" type="text" readonly value="{{ feed_url }}">
+      <button class="btn-copy" onclick="copyUrl()">Copy</button>
+    </div>
+    <p class="hint">Subscribe to this URL in your RSS reader. No login is needed for
+    feed URLs — the random token keeps them private.</p>
+  </div>
+  {% endif %}
+
+  <form method="post" action="{{ url_for('generate') }}">
+
+    <!-- Step 1: source -->
+    <div class="panel">
+      <h2><span class="step">1</span>Source RSS feed</h2>
+      <label for="source_url">Existing RSS / Atom feed URL</label>
+      <input type="url" id="source_url" name="source_url" required
+             placeholder="https://example.com/feed.xml"
+             value="{{ form.get('source_url', '') if form else '' }}">
+      <p class="hint">This feed will be used as the source for all processing.</p>
+    </div>
+
+    <!-- Step 2: keywords -->
+    <div class="panel">
+      <h2><span class="step">2</span>Keyword filtering</h2>
+
+      <label>Match keywords in</label>
+      <div class="radio-row" style="margin-bottom: .9rem;">
+        <label><input type="radio" name="match_mode" value="title"
+          {% if not form or form.get('match_mode', 'title') == 'title' %}checked{% endif %}>
+          Title only</label>
+        <label><input type="radio" name="match_mode" value="both"
+          {% if form and form.get('match_mode') == 'both' %}checked{% endif %}>
+          Title and description</label>
+      </div>
+
+      <label>Keywords <span style="color:var(--muted)">(type them in the same language as the source feed; matching is case-insensitive, any keyword matches)</span></label>
+      <div id="kw-list">
+        {% set kws = saved_keywords if saved_keywords else (form.getlist('keywords') if form else []) %}
+        {% for i in range([3, kws|length]|max) %}
+        <div class="kw-row">
+          <input type="text" name="keywords" maxlength="120"
+                 placeholder="Keyword {{ i + 1 }}" value="{{ kws[i] if i < kws|length else '' }}">
+          <button type="button" class="kw-del" title="Remove" onclick="removeKw(this)">×</button>
+        </div>
+        {% endfor %}
+      </div>
+      <button type="button" class="btn-add" onclick="addKw()">＋ Add keyword</button>
+      <p class="hint">Leave all keyword fields empty to include every item from the source feed.</p>
+    </div>
+
+    <!-- Step 3: limits & translation -->
+    <div class="panel">
+      <h2><span class="step">3</span>Limits &amp; translation</h2>
+      <div class="grid2">
+        <div>
+          <label for="max_items">Maximum number of items</label>
+          <input type="number" id="max_items" name="max_items" min="1" max="200"
+                 value="{{ form.get('max_items', default_max_items) if form else default_max_items }}">
+          <p class="hint">Default: {{ default_max_items }} items.</p>
+        </div>
+        <div>
+          <label for="target_lang">Translate titles &amp; descriptions to</label>
+          <select id="target_lang" name="target_lang">
+            {% for code, name in languages.items() %}
+            <option value="{{ code }}"
+              {% if form and form.get('target_lang') == code %}selected{% endif %}>{{ name }}</option>
+            {% endfor %}
+          </select>
+          {% if languages|length <= 1 %}
+          <p class="hint">No translation models installed yet —
+            <a href="{{ url_for('models_page') }}" style="color:var(--accent2)">install one</a>
+            to enable local translation.</p>
+          {% else %}
+          <p class="hint">Translated locally on this server (Argos, offline).</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <button type="submit" class="btn-generate">⚙ Generate my RSS feed URL</button>
+  </form>
+
+  <footer>xsukax RSS Filter &amp; Translator · local translation · port 6985</footer>
+</div>
+
+<script>
+  function addKw() {
+    const list = document.getElementById('kw-list');
+    const n = list.children.length + 1;
+    if (n > 30) return;
+    const row = document.createElement('div');
+    row.className = 'kw-row';
+    row.innerHTML = '<input type="text" name="keywords" maxlength="120" placeholder="Keyword ' + n + '">' +
+                    '<button type="button" class="kw-del" title="Remove" onclick="removeKw(this)">×</button>';
+    list.appendChild(row);
+    row.querySelector('input').focus();
+  }
+  function removeKw(btn) { btn.parentElement.remove(); }
+  function copyUrl() {
+    const inp = document.getElementById('feed-url');
+    inp.select();
+    navigator.clipboard.writeText(inp.value).then(() => {
+      const b = document.querySelector('.btn-copy');
+      b.textContent = 'Copied ✔';
+      setTimeout(() => b.textContent = 'Copy', 1500);
+    });
+  }
+  {% if feed_url %}document.getElementById('result').scrollIntoView({behavior:'smooth'});{% endif %}
+</script>
+</body>
+</html>

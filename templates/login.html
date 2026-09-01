@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>xsukax RSS Filter &amp; Translator — Login</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="login-card">
+  <header>
+    <div class="logo">📡</div>
+    <h1><span class="brand">xsukax</span> RSS Filter &amp; Translator</h1>
+    <p class="tagline">Filtered, translated, self-hosted RSS feeds.</p>
+  </header>
+
+  {% if error %}
+  <div class="errors">{{ error }}</div>
+  {% endif %}
+
+  <form method="post" action="{{ url_for('login') }}">
+    <label for="password">Password</label>
+    <input type="password" id="password" name="password" required
+           autofocus autocomplete="current-password"
+           placeholder="Enter password">
+    <p class="hint" style="margin-bottom: 1rem;">Default password: <code>xsukax</code> — change it after first login.</p>
+    <button type="submit" class="btn-main">🔒 Log in</button>
+  </form>
+
+  <p class="lock-note">This area is private. Feed URLs stay accessible to your RSS reader.</p>
+</div>
+</body>
+</html>

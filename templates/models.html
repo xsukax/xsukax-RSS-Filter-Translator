@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Translation models — xsukax</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+{% if tasks and tasks.values()|select('in', ['starting','downloading','installing','warming up'])|list %}
+<meta http-equiv="refresh" content="4">
+{% endif %}
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo">🌐</div>
+    <h1><span class="brand">xsukax</span> — Translation models</h1>
+    <p class="tagline">All translation runs locally on this server (Argos Translate, offline neural MT).
+      Models are downloaded once, then used without any internet access.</p>
+  </header>
+
+  <nav>
+    <a href="{{ url_for('index') }}">⚙ Generator</a>
+    <a href="{{ url_for('models_page') }}" class="active">🌐 Translation models</a>
+    <a href="{{ url_for('change_password') }}">🔑 Change password</a>
+    <a href="{{ url_for('logout') }}">⏻ Logout</a>
+  </nav>
+
+  <div class="panel">
+    <h2>Installed models ({{ installed|length }})</h2>
+    {% if installed %}
+    <table>
+      <tr><th>Pair</th><th></th></tr>
+      {% for p in installed %}
+      <tr>
+        <td>{{ p.from_name }} → {{ p.to_name }} <span class="badge">{{ p.from_code }} → {{ p.to_code }}</span></td>
+        <td style="text-align:right">
+          <form method="post" action="{{ url_for('models_delete') }}" style="display:inline"
+                onsubmit="return confirm('Delete model {{ p.from_code }} → {{ p.to_code }}?');">
+            <input type="hidden" name="from_code" value="{{ p.from_code }}">
+            <input type="hidden" name="to_code" value="{{ p.to_code }}">
+            <button class="btn-small danger" type="submit">Delete</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="hint">No models installed yet. Install a pair below — e.g. the language of your
+    source feeds → your language.</p>
+    {% endif %}
+  </div>
+
+  {% if tasks %}
+  <div class="panel">
+    <h2>Active / recent installs</h2>
+    <table>
+      {% for key, status in tasks.items() %}
+      <tr>
+        <td>{{ key }}</td>
+        <td style="text-align:right">
+          {% if status in ['starting','downloading','installing','warming up'] %}
+            <span class="badge busy">⏳ {{ status }}</span>
+          {% elif status == 'done' %}
+            <span class="badge ok">✔ done</span>
+          {% else %}
+            <span class="badge err">{{ status }}</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+    <p class="hint">This page refreshes automatically while an install is running.
+    Models are 100–300 MB, so downloading can take a few minutes.</p>
+  </div>
+  {% endif %}
+
+  <div class="panel">
+    <h2>Available models</h2>
+    {% if available is none %}
+    <p class="hint">Could not reach the Argos package index. The server needs one-time
+    internet access to raw.githubusercontent.com and data.argosopentech.com to download
+    models; translation itself then works fully offline.</p>
+    {% else %}
+    <table>
+      <tr><th>Pair</th><th></th></tr>
+      {% for p in available %}
+      <tr>
+        <td>{{ p.from_name }} → {{ p.to_name }} <span class="badge">{{ p.from_code }} → {{ p.to_code }}</span></td>
+        <td style="text-align:right">
+          {% if p.installed %}
+            <span class="badge ok">installed</span>
+          {% else %}
+          <form method="post" action="{{ url_for('models_install') }}" style="display:inline">
+            <input type="hidden" name="from_code" value="{{ p.from_code }}">
+            <input type="hidden" name="to_code" value="{{ p.to_code }}">
+            <button class="btn-small" type="submit">Install</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% endif %}
+  </div>
+
+  <footer>Translation quality note: direct pairs (e.g. de→en) are best.
+  Keep model count low on small VPSs — each loaded model uses ~150–300 MB RAM while translating.</footer>
+</div>
+</body>
+</html>

@@ -75,7 +75,33 @@
   {% endif %}
 
   <div class="panel">
+    <h2>NLLB-200 engine — 200 languages (Amharic, Tigrinya, Oromo, Somali → Arabic …)</h2>
+    <p class="hint" style="margin-bottom:.8rem">
+      The Argos models above cover ~50 languages. For languages Argos does not have —
+      including <strong>Ethiopian languages (Amharic, Tigrinya, Oromo) and Somali → Arabic</strong> —
+      install Meta's NLLB-200 (int8, ~620 MB, runs locally on CPU).
+      Once installed, the target list offers <em>Arabic — NLLB, from any language</em>.
+      <br>⚠ Needs ~1 GB free RAM while translating and ~1.5 GB disk. License: CC-BY-NC-4.0
+      (non-commercial use).
+    </p>
+    {% if nllb %}
+      <p><span class="badge ok">✔ installed</span>
+      <span class="hint">Arabic, English, French, Amharic, Tigrinya, Oromo, Somali and more
+      now appear as translation targets.</span></p>
+    {% else %}
+      <form method="post" action="{{ url_for('models_install_nllb') }}"
+            onsubmit="return confirm('Download ~620 MB NLLB-200 model now?');">
+        <button class="btn-small" type="submit">⬇ Install NLLB-200 (620 MB)</button>
+      </form>
+    {% endif %}
+  </div>
+
+  <div class="panel">
     <h2>Available models</h2>
+    <p class="hint" style="margin-bottom:.6rem">Tip: <strong>pivoting is automatic</strong> —
+      e.g. install <em>French → English</em> and <em>English → Arabic</em> and
+      <em>French → Arabic</em> works by pivoting through English. The same trick gives you
+      <em>any listed language → Arabic</em>.</p>
     {% if available is none %}
     <p class="hint">Could not reach the Argos package index. The server needs one-time
     internet access to raw.githubusercontent.com and data.argosopentech.com to download

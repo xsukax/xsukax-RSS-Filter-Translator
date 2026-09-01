@@ -322,6 +322,6 @@ This project is distributed under the [GNU General Public License v3.0](https://
 
 ## Author / Maintainers
 
-- **xsukax** — project author and primary maintainer.
+- [**xsukax**](https://github.com/xsukax) — project author and primary maintainer.
 
 For general questions, bug reports, and feature requests, use the repository's [GitHub Issues](https://github.com/xsukax/xsukax-RSS-Filter-Translator/issues). For security-sensitive reports, follow the private process described in the [Security](#security) section.

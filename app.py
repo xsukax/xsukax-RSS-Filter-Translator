@@ -62,6 +62,17 @@ MAX_DL_BYTES = int(os.environ.get("XSUKAX_MAX_DL_BYTES", str(5 * 1024 * 1024)))
 TR_BUDGET = float(os.environ.get("XSUKAX_TR_BUDGET", "120"))      # per build
 HTTP_TIMEOUT = 15  # seconds
 
+# Optional NLLB-200 engine (CTranslate2 int8, ~620 MB) for the ~200 languages
+# Argos does not cover — incl. Amharic, Tigrinya, Oromo, Somali -> Arabic.
+# Model: facebook/nllb-200-distilled-600M (license: CC-BY-NC-4.0).
+NLLB_REPO = os.environ.get("XSUKAX_NLLB_REPO",
+                           "mijuanlo/nllb-200-distilled-600M-ct2-int8")
+NLLB_DIR = os.path.join(DATA_DIR, "nllb-model")
+
+# Which local engine to use: "auto" (Argos first, NLLB fallback),
+# "nllb" (NLLB first for everything, Argos fallback), "argos" (Argos only).
+TRANSLATE_ENGINE = os.environ.get("XSUKAX_TRANSLATE_ENGINE", "auto").lower()
+
 DEFAULT_MAX_ITEMS = 20
 MAX_ITEMS_HARD_LIMIT = 200
 MAX_KEYWORDS = 30
@@ -195,6 +206,72 @@ def login_required(view):
 
 
 # --------------------------------------------------------------------------
+# Text protection helpers (HTML tags / URLs / safe truncation)
+# --------------------------------------------------------------------------
+
+_MAX_TRANSLATE_CHARS = 20000   # work bound per text; cut at a safe boundary
+
+
+def _safe_truncate(text, limit=_MAX_TRANSLATE_CHARS):
+    """Truncate without cutting inside an HTML tag, entity or URL, and
+    prefer ending at a sentence boundary — a cut mid-attribute produces
+    invalid HTML inside feed descriptions."""
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    lt, gt = cut.rfind("<"), cut.rfind(">")
+    if lt > gt:                       # inside a tag -> drop the partial tag
+        cut = cut[:lt]
+    amp, semi = cut.rfind("&"), cut.rfind(";")
+    if amp > semi:                    # inside an entity -> drop it
+        cut = cut[:amp]
+    return cut
+
+
+_TAG_OR_URL_RE = re.compile(r"\s*(<[^>]+>|https?://[^\s<>\"']+)\s*")
+
+
+def _mask_html(text):
+    """Replace HTML tags and URLs (with their original surrounding whitespace)
+    by translation-stable placeholders so the MT engine cannot mangle or
+    truncate markup (the 'unterminated attribute' class of validator errors)."""
+    saved = []
+
+    def repl(m):
+        saved.append(m.group(0))     # keep original whitespace for exact restore
+        return f" ZQZ{len(saved) - 1}ZQZ "
+
+    return _TAG_OR_URL_RE.sub(repl, text), saved
+
+
+def _unmask_html(text, saved):
+    """Restore placeholders incl. original whitespace; tolerates spaces the
+    MT engine may insert. Placeholders the engine dropped are omitted
+    (safe degradation)."""
+    def repl(m):
+        i = int(m.group(1))
+        return saved[i] if i < len(saved) else " "
+    return re.sub(r"\s*Z\s?Q\s?Z\s?(\d+)\s?Z\s?Q\s?Z\s*", repl, text).strip()
+
+
+def _sentence_chunks(text, limit=1000):
+    """Split text into <= limit-char chunks on sentence boundaries."""
+    parts = re.split(r"(?<=[.!?؟。…؛])\s+|\n+", text)
+    chunks, cur = [], ""
+    for part in parts:
+        if len(part) > limit:
+            part = _safe_truncate(part, limit)
+        if cur and len(cur) + len(part) + 1 > limit:
+            chunks.append(cur)
+            cur = part
+        else:
+            cur = f"{cur} {part}".strip()
+    if cur:
+        chunks.append(cur)
+    return chunks or [text[:limit]]
+
+
+# --------------------------------------------------------------------------
 # Local translation (Argos Translate — fully offline, lazy-loaded)
 # --------------------------------------------------------------------------
 
@@ -285,9 +362,131 @@ def _detect_lang(text):
         return ""
 
 
-def _translate_one_local(text, target_lang, source_lang):
+# --------------------------------------------------------------------------
+# Optional NLLB-200 engine (200 languages, incl. Ethiopian -> Arabic)
+# --------------------------------------------------------------------------
+
+# Feed/ISO language code -> FLORES-200 code used by NLLB.
+NLLB_LANGS = {
+    "en": "eng_Latn", "fr": "fra_Latn", "ar": "arb_Arab", "de": "deu_Latn",
+    "es": "spa_Latn", "it": "ita_Latn", "pt": "por_Latn", "ru": "rus_Latn",
+    "zh": "zho_Hans", "ja": "jpn_Jpan", "ko": "kor_Hang", "tr": "tur_Latn",
+    "nl": "nld_Latn", "pl": "pol_Latn", "sv": "swe_Latn", "uk": "ukr_Cyrl",
+    "he": "heb_Hebr", "hi": "hin_Deva", "id": "ind_Latn", "vi": "vie_Latn",
+    "th": "tha_Thai", "el": "ell_Grek", "cs": "ces_Latn", "ro": "ron_Latn",
+    "hu": "hun_Latn", "fi": "fin_Latn", "da": "dan_Latn", "no": "nob_Latn",
+    "fa": "pes_Arab", "ur": "urd_Arab", "sw": "swh_Latn",
+    # Ethiopian & Horn of Africa languages (only available via NLLB):
+    "am": "amh_Ethi",   # Amharic
+    "ti": "tir_Ethi",   # Tigrinya
+    "om": "gaz_Latn",   # Oromo (West Central)
+    "so": "som_Latn",   # Somali
+    "aa": "aar_Latn",   # Afar
+    "ha": "hau_Latn",   # Hausa
+}
+
+# Target languages offered in the dropdown when NLLB is installed.
+NLLB_TARGET_CHOICES = {
+    "ar": "Arabic (العربية) — NLLB, from any language",
+    "en": "English — NLLB",
+    "fr": "French — NLLB",
+    "am": "Amharic (አማርኛ) — NLLB",
+    "ti": "Tigrinya (ትግርኛ) — NLLB",
+    "om": "Oromo (Afaan Oromoo) — NLLB",
+    "so": "Somali (Soomaali) — NLLB",
+    "de": "German — NLLB",
+    "es": "Spanish — NLLB",
+    "tr": "Turkish — NLLB",
+}
+
+_nllb = {"translator": None, "sp": None}
+_nllb_lock = threading.Lock()
+
+
+def nllb_installed():
+    return os.path.exists(os.path.join(NLLB_DIR, "model.bin"))
+
+
+def _nllb_translate(text, target_lang, source_lang):
+    """Translate with the local NLLB-200 model. Raises if unsupported."""
+    src = NLLB_LANGS.get(source_lang)
+    tgt = NLLB_LANGS.get(target_lang)
+    if not src or not tgt:
+        raise RuntimeError(f"NLLB has no mapping for "
+                           f"'{source_lang}' -> '{target_lang}'")
+    with _nllb_lock:
+        if _nllb["translator"] is None:
+            import ctranslate2
+            import sentencepiece as spm
+            _nllb["sp"] = spm.SentencePieceProcessor(
+                model_file=os.path.join(NLLB_DIR, "sentencepiece.bpe.model"))
+            _nllb["translator"] = ctranslate2.Translator(
+                NLLB_DIR, device="cpu", compute_type="int8", inter_threads=1)
+    sp, translator = _nllb["sp"], _nllb["translator"]
+    translated = []
+    for chunk in _sentence_chunks(_safe_truncate(text), limit=1000):
+        pieces = [src] + sp.encode(chunk, out_type=str) + ["</s>"]
+        results = translator.translate_batch(
+            [pieces], target_prefix=[[tgt]], beam_size=2,
+            max_decoding_length=512, max_input_length=1024)
+        out = list(results[0].hypotheses[0])
+        if out and out[0] == tgt:
+            out = out[1:]
+        if out and out[-1] == "</s>":
+            out = out[:-1]
+        translated.append(sp.decode(out))
+    return " ".join(translated) or text
+
+
+def _install_nllb_worker():
+    key = "nllb"
+    try:
+        from huggingface_hub import snapshot_download
+        with _model_tasks_lock:
+            _model_tasks[key] = "downloading (~620 MB)"
+        snapshot_download(repo_id=NLLB_REPO, local_dir=NLLB_DIR,
+                          ignore_patterns=["*.md", ".gitattributes", "*.txt"])
+        with _model_tasks_lock:
+            _model_tasks[key] = "warming up"
+        _nllb_translate("Hello world", "am", "en")   # load test
+        with _model_tasks_lock:
+            _model_tasks[key] = "done"
+        log.info("NLLB-200 model installed")
+    except Exception as exc:                         # noqa: BLE001
+        with _model_tasks_lock:
+            _model_tasks[key] = f"error: {exc}"
+        log.warning("NLLB install failed: %s", exc)
+
+
+def _argos_translate(text, target_lang, source_lang):
+    # Argos splits sentences internally; just bound the total work safely.
     translation = _get_translation(source_lang, target_lang)
-    return translation.translate(text[:4500]) or text
+    return translation.translate(_safe_truncate(text)) or text
+
+
+def _translate_one_local(text, target_lang, source_lang):
+    """Local translation using the engine order from XSUKAX_TRANSLATE_ENGINE:
+    auto -> Argos first (best quality per pair), NLLB fallback;
+    nllb -> NLLB first for everything, Argos fallback;
+    argos -> Argos only."""
+    order = {"nllb": ("nllb", "argos"),
+             "argos": ("argos",)}.get(TRANSLATE_ENGINE, ("argos", "nllb"))
+    # Protect HTML tags and URLs from the MT engine (and from truncation).
+    masked, saved = _mask_html(text)
+    errors = []
+    for engine in order:
+        if engine == "nllb" and not nllb_installed():
+            errors.append("nllb: model not installed")
+            continue
+        try:
+            if engine == "argos":
+                out = _argos_translate(masked, target_lang, source_lang)
+            else:
+                out = _nllb_translate(masked, target_lang, source_lang)
+            return _unmask_html(out, saved)
+        except Exception as exc:                     # noqa: BLE001
+            errors.append(f"{engine}: {exc}")
+    raise RuntimeError("; ".join(errors))
 
 
 def _translate_uncached(texts, target_lang, source_lang):
@@ -620,11 +819,31 @@ def change_password():
 # ---------- feed generator ----------
 
 def _target_languages():
-    """Target languages the user can pick: installed Argos models only."""
+    """Target languages the user can pick: everything reachable with the
+    installed Argos models (direct pairs AND automatic pivots, e.g.
+    fr -> en -> ar), plus curated NLLB targets when that engine is installed."""
     langs = {"none": "No translation (keep original)"}
-    for p in installed_pairs():
-        langs.setdefault(p["to_code"],
-                         f"{p['to_name']} (from {p['from_name']})")
+    try:
+        _, tr_mod = _argo()
+        seen = {}
+        for lang in tr_mod.get_installed_languages():
+            for t in lang.translations_from:
+                code = t.to_lang.code
+                if code == lang.code or code in seen:
+                    continue
+                direct = type(t).__name__ != "CompositeTranslation"
+                seen[code] = (t.to_lang.name, direct)
+        for code, (name, direct) in sorted(seen.items(),
+                                           key=lambda kv: kv[1][0]):
+            langs[code] = name if direct else f"{name} (pivot via English)"
+    except Exception as exc:                           # noqa: BLE001
+        log.warning("could not build target list: %s", exc)
+    if nllb_installed():
+        for code, label in NLLB_TARGET_CHOICES.items():
+            if code in langs and code != "none":
+                langs[code] += " + NLLB"
+            else:
+                langs[code] = label
     return langs
 
 
@@ -714,7 +933,8 @@ def models_page():
     return render_template("models.html",
                            installed=installed_pairs(),
                            available=avail,
-                           tasks=tasks)
+                           tasks=tasks,
+                           nllb=nllb_installed())
 
 
 @app.route("/models/install", methods=["POST"])
@@ -733,6 +953,19 @@ def models_install():
             _model_tasks[key] = "starting"
         threading.Thread(target=_install_model_worker,
                          args=(from_code, to_code), daemon=True).start()
+    return redirect(url_for("models_page"))
+
+
+@app.route("/models/install-nllb", methods=["POST"])
+@login_required
+def models_install_nllb():
+    with _model_tasks_lock:
+        status = _model_tasks.get("nllb", "")
+        already = status.startswith(("downloading", "installing", "warming"))
+    if not already and not nllb_installed():
+        with _model_tasks_lock:
+            _model_tasks["nllb"] = "starting"
+        threading.Thread(target=_install_nllb_worker, daemon=True).start()
     return redirect(url_for("models_page"))
 
 
@@ -760,11 +993,22 @@ def models_delete():
 @app.route("/health", methods=["GET"])
 def health():
     info = {"status": "ok", "service": "xsukax-rss-filter", "port": PORT,
-            "translation": "local (argos)"}
+            "translation": "local (argos%s)" % (" + nllb" if nllb_installed() else ""),
+            "engine": TRANSLATE_ENGINE}
     if request.args.get("check"):
         pairs = installed_pairs()
         info["installed_models"] = [f"{p['from_code']}->{p['to_code']}"
                                     for p in pairs]
+        info["nllb"] = "installed" if nllb_installed() else "not installed"
+        if nllb_installed() and request.args.get("nllb"):
+            try:
+                t0 = time.monotonic()
+                info["nllb_selftest"] = {
+                    "ok": True, "pair": "am->ar",
+                    "sample": _nllb_translate("ሰላም ልዑል፣ ይህ ሙከራ ነው።", "ar", "am"),
+                    "seconds": round(time.monotonic() - t0, 2)}
+            except Exception as exc:               # noqa: BLE001
+                info["nllb_selftest"] = {"ok": False, "error": str(exc)[:300]}
         if pairs and request.args.get("tl"):
             tl = _argo_code(request.args["tl"])
             src = next((p["from_code"] for p in pairs

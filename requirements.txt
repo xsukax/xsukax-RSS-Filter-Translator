@@ -5,3 +5,4 @@ waitress>=3.0
 argostranslate>=1.11
 minisbd>=0.9
 langdetect>=1.0.9
+huggingface_hub>=0.24
